@@ -1,16 +1,15 @@
 import numpy as np
 
-
 class StockPathSimulation:
 
     def __init__(self,
-                 expiryTime = 1,
+                 expirationTime = 1.0,
                  numOfSims = 10,
                  numOfSteps = 252):
-        self.t = expiryTime
+        self.t = expirationTime
         self.nSims = numOfSims
         self.nSteps = numOfSteps
-    
+
 
 
     def simBrownianMotionProcess(self):
@@ -20,8 +19,8 @@ class StockPathSimulation:
         res = np.random.normal(loc = 0, scale = np.sqrt(increment), size = (self.nSims,self.nSteps))
         res = np.insert(res, 0, 0, axis=1)
         return np.cumsum(res, axis = 1)
-    
-    
+
+
     def simPoissonProcess(self, intensity = 1.0):
 
         increment = self.t/self.nSteps
@@ -48,8 +47,7 @@ class StockPathSimulation:
                     intensity = 1.0,
                     initialPrice = 100.0):
         ts = np.linspace(0,self.t,self.nSteps+1)
-        res, _ = np.meshgrid(ts, np.zeros(self.nSims))
-
+        res = np.broadcast_to(ts, (self.nSims, self.nSteps+1))
         res = res * (meanRateOfReturn - volatility*intensity)
         res += np.log(volatility + 1) * self.simPoissonProcess(intensity)
 
@@ -70,5 +68,4 @@ class StockPathSimulation:
         res += np.array(np.linspace(0,self.t,self.nSteps+1)) * (meanRateOfReturn - beta*intensity - 0.5*volatility**2)
         res += self.simCompoundPoissonProcess(intensity, np.log(np.array(jumps)+1), jumpProbabilities)
         return initialPrice * np.exp(res)
-
 
