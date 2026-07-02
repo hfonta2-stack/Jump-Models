@@ -1,5 +1,6 @@
 import numpy as np
 
+
 class StockPathSimulation:
 
     def __init__(self,
@@ -9,6 +10,7 @@ class StockPathSimulation:
         self.t = expirationTime
         self.nSims = numOfSims
         self.nSteps = numOfSteps
+        self.times = np.linspace(0,expirationTime,numOfSteps+1)
 
 
 
@@ -19,6 +21,17 @@ class StockPathSimulation:
         res = np.random.normal(loc = 0, scale = np.sqrt(increment), size = (self.nSims,self.nSteps))
         res = np.insert(res, 0, 0, axis=1)
         return np.cumsum(res, axis = 1)
+
+
+    def simGeomBrownianMotion(self,
+                              meanRateOfReturn = 1.0,
+                              volatility = 0.5,
+                              initialPrice = 100.0):
+
+        res = volatility * self.simBrownianMotionProcess()
+        res += (meanRateOfReturn - 0.5*volatility**2) * np.broadcast_to(self.times, (self.nSims, self.nSteps+1))
+        return initialPrice * np.exp(res)
+
 
 
     def simPoissonProcess(self, intensity = 1.0):
@@ -46,8 +59,7 @@ class StockPathSimulation:
                     volatility = 0.5,
                     intensity = 1.0,
                     initialPrice = 100.0):
-        ts = np.linspace(0,self.t,self.nSteps+1)
-        res = np.broadcast_to(ts, (self.nSims, self.nSteps+1))
+        res = np.broadcast_to(self.times, (self.nSims, self.nSteps+1))
         res = res * (meanRateOfReturn - volatility*intensity)
         res += np.log(volatility + 1) * self.simPoissonProcess(intensity)
 
@@ -69,3 +81,9 @@ class StockPathSimulation:
         res += self.simCompoundPoissonProcess(intensity, np.log(np.array(jumps)+1), jumpProbabilities)
         return initialPrice * np.exp(res)
 
+
+
+
+    def plotSimulation(self, process, ax):
+        for i in range(self.nSims):
+            ax.plot(self.times,process[i])
