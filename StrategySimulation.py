@@ -27,8 +27,17 @@ class StrategySimulation:
         
         '''
 
+        size = [1 for _ in range(len(x.shape))]
+        size[0] = self.nSims
+        size[1] = self.nSteps
+        size = tuple(size)
 
-        taus = np.broadcast_to(self.t-self.times[:-1], (self.nSims,self.nSteps))
+        temp = [1 for _ in range(len(x.shape))]
+        temp[1] = self.nSteps
+        temp = tuple(temp)
+        
+        taus = np.reshape(self.t-self.times[:-1], temp)
+        taus = np.broadcast_to(taus, size)
 
 
         d1 = (np.log(x[:,:self.nSteps]/K) + (self.r - (0.5)*volatility**2)*taus)/(volatility*np.sqrt(taus))
@@ -53,7 +62,17 @@ class StrategySimulation:
         
         '''
 
-        taus = np.broadcast_to(self.t-self.times[:-1], (self.nSims,self.nSteps))
+        size = [1 for _ in range(len(x.shape))]
+        size[0] = self.nSims
+        size[1] = self.nSteps
+        size = tuple(size)
+
+        temp = [1 for _ in range(len(x.shape))]
+        temp[1] = self.nSteps
+        temp = tuple(temp)
+        
+        taus = np.reshape(self.t-self.times[:-1], temp)
+        taus = np.broadcast_to(taus, size)
 
         d2 = (np.log(x[:,:self.nSteps]/K) + (self.r + (0.5)*volatility**2)*taus)/(volatility*np.sqrt(taus))
 
@@ -62,6 +81,189 @@ class StrategySimulation:
         res = np.insert(res, self.nSteps, 1, axis = 1)
 
         return res
+
+
+
+    def poissonCallPrice(self, x, K, volatility, meanRate, intensity, error):
+
+        ltild = intensity - (meanRate - self.r) / volatility
+        if ltild <= 0:
+            print('There is arbitrage!')
+            raise Exception
+    
+
+        taus = np.broadcast_to(self.t - self.times, (self.nSims,self.nSteps+1))
+        logTaus = np.log(taus[:,:-1])
+
+        logFactorial = 0
+
+        stockTerm = x * np.exp(- ltild * volatility * taus)
+        strikeTerm = K * np.exp(-self.r * taus)
+
+        total_sum = np.maximum(0.0, stockTerm - strikeTerm)
+
+        priceCap = x[0,0]*10
+        jMax = np.ceil(np.max(poisson.ppf(1 - error/priceCap, ltild * (1 + volatility) * taus)))
+
+
+        j = 1
+        while j <= jMax:
+
+            payoffTerm = np.maximum(0.0, stockTerm * np.exp(j * np.log(volatility + 1)) - strikeTerm)
+
+            logProb = j* np.log(ltild) + j* logTaus - logFactorial
+            weight = np.insert(np.exp(logProb), self.nSteps, 0, axis = 1) 
+
+            total_sum += payoffTerm * weight
+
+            j += 1
+            logFactorial += np.log(j)
+
+        return total_sum * np.exp(- ltild * taus)
+
+
+    def gamma1(self, x, K, volatility, meanRate, intensity, error):
+
+        temp1 = self.poissonCallPrice((volatility+1)*x, K, volatility, meanRate, intensity, error)
+        temp2 = self.poissonCallPrice(x, K, volatility, meanRate, intensity, error)
+        return (temp1 - temp2)/(volatility * x)
+
+
+
+
+    def jumpDiffusionCallPrice(self, x, K, volatility, jumps, parameters, error):
+
+        ltild = np.sum(parameters)
+        p = parameters/ltild
+        btild = p @ jumps
+
+        taus = np.broadcast_to(self.t - self.times, (self.nSims,self.nSteps+1))
+        z = x * np.exp(- btild * ltild * taus)
+        totalSum = self.kappa(z,K,volatility)
+
+
+        logTaus = np.log(taus[:,:-1])
+
+        logFactorial = 0
+
+        priceCap = x[0,0]*10
+        jMax = np.ceil(np.max(poisson.ppf(1 - error/priceCap, ltild * (1 + btild) * taus)))
+
+
+        a = len(jumps)
+        y = np.array(jumps)
+
+        currentSize1 = [self.nSims, self.nSteps+1]
+        currentSize2 = [1, 1]
+        currentSize3 = []
+        currentAxes = []
+
+        j = 1
+
+
+        while j <= jMax:
+            currentSize1.append(1)
+            currentSize2.append(a)
+            z = np.reshape(z,tuple(currentSize1)) @ np.reshape(1 + y, tuple(currentSize2))
+            currentSize1.pop()
+            currentSize2.pop()
+            currentSize1.append(a)
+            currentSize2.append(1)
+
+            currentAxes.append(1+j)
+            currentSize3.append(a)
+            p = np.broadcast_to(p, tuple(currentSize3))
+            payoffTerm = np.sum(self.kappa(z,K,volatility)*p, axis = tuple(currentAxes))
+
+            logProb = j* np.log(ltild) + j* logTaus - logFactorial
+            weight = np.insert(np.exp(logProb), self.nSteps, 0, axis = 1) 
+
+            totalSum += payoffTerm * weight
+
+            j += 1
+            logFactorial += np.log(j)
+
+        return totalSum * np.exp(- ltild * taus)
+
+
+
+
+    def gamma2(self, x, K, volatility, jumps, parameters, error):
+
+        ltild = np.sum(parameters)
+        p = parameters/ltild
+        btild = p @ jumps
+
+        taus = np.broadcast_to(self.t - self.times, (self.nSims,self.nSteps+1))
+        z = x * np.exp(- btild * ltild * taus)
+        totalSum = self.delta(z,K,volatility)
+
+
+        logTaus = np.log(taus[:,:-1])
+
+        logFactorial = 0
+
+        priceCap = x[0,0]*10
+        jMax = np.ceil(np.max(poisson.ppf(1 - error/priceCap, ltild * (1 + btild) * taus)))
+
+
+        a = len(jumps)
+        y = np.array(jumps)
+
+        currentSize1 = [self.nSims, self.nSteps+1]
+        currentSize2 = [1, 1]
+
+        coeffs = p * (1+y)
+
+        currentSize3 = [a]
+        currentSize4 = [1]
+        currentAxes = []
+
+        j = 1
+
+
+        while j <= jMax:
+
+            currentSize1.append(1)
+            currentSize2.append(a)
+            z = np.reshape(z,tuple(currentSize1)) @ np.reshape(1 + y, tuple(currentSize2))
+            currentSize1.pop()
+            currentSize2.pop()
+            currentSize1.append(a)
+            currentSize2.append(1)
+
+
+
+            currentAxes.append(1+j)
+
+            payoffTerm = np.sum(self.delta(z,K,volatility)*coeffs, axis = tuple(currentAxes))
+
+
+            currentSize3.append(1)
+            currentSize4.append(a)
+            coeffs = np.reshape(coeffs, tuple(currentSize3)) @ np.reshape(p*(1+y), tuple(currentSize4))
+            currentSize3.pop()
+            currentSize4.pop()
+            currentSize3.append(a)
+            currentSize4.append(1)
+
+
+
+
+
+
+            logProb = j* np.log(ltild) + j* logTaus - logFactorial
+            weight = np.insert(np.exp(logProb), self.nSteps, 0, axis = 1) 
+
+            totalSum += payoffTerm * weight
+
+            j += 1
+            logFactorial += np.log(j)
+
+        return totalSum * np.exp(- ltild *(1 + btild) * taus)
+
+
+
 
 
 
