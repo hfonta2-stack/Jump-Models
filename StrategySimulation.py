@@ -27,17 +27,8 @@ class StrategySimulation:
         
         '''
 
-        size = [1 for _ in range(len(x.shape))]
-        size[0] = self.nSims
-        size[1] = self.nSteps
-        size = tuple(size)
-
-        temp = [1 for _ in range(len(x.shape))]
-        temp[1] = self.nSteps
-        temp = tuple(temp)
-        
-        taus = np.reshape(self.t-self.times[:-1], temp)
-        taus = np.broadcast_to(taus, size)
+        taus = self.t-self.times[:-1]
+        taus = np.broadcast_to(taus, (self.nSims, self.nSteps))
 
 
         d1 = (np.log(x[:,:self.nSteps]/K) + (self.r - (0.5)*volatility**2)*taus)/(volatility*np.sqrt(taus))
@@ -62,17 +53,8 @@ class StrategySimulation:
         
         '''
 
-        size = [1 for _ in range(len(x.shape))]
-        size[0] = self.nSims
-        size[1] = self.nSteps
-        size = tuple(size)
-
-        temp = [1 for _ in range(len(x.shape))]
-        temp[1] = self.nSteps
-        temp = tuple(temp)
-        
-        taus = np.reshape(self.t-self.times[:-1], temp)
-        taus = np.broadcast_to(taus, size)
+        taus = self.t-self.times[:-1]
+        taus = np.broadcast_to(taus, (self.nSims, self.nSteps))
 
         d2 = (np.log(x[:,:self.nSteps]/K) + (self.r + (0.5)*volatility**2)*taus)/(volatility*np.sqrt(taus))
 
@@ -129,6 +111,33 @@ class StrategySimulation:
         return (temp1 - temp2)/(volatility * x)
 
 
+    def findCombinations(self, j, numJumps):
+        res = []
+
+        def dfs(cur, curInd, curTotal):
+            if curTotal == j:
+                res.append(cur.copy())
+                return
+            if curInd >= numJumps:
+                return
+            cur[curInd] += 1
+            dfs(cur,curInd,curTotal + 1)
+            cur[curInd] -= 1
+
+            dfs(cur,curInd + 1, curTotal)
+
+            return
+        
+        cur = [0 for _ in range(numJumps)]
+
+        dfs(cur,0,0)
+
+        return res
+
+                
+
+
+
 
 
     def jumpDiffusionCallPrice(self, x, K, volatility, jumps, parameters, error):
@@ -144,44 +153,44 @@ class StrategySimulation:
 
         logTaus = np.log(taus[:,:-1])
 
-        logFactorial = 0
 
         priceCap = x[0,0]*10
-        jMax = np.ceil(np.max(poisson.ppf(1 - error/priceCap, ltild * (1 + btild) * taus)))
+        jMax = int(np.ceil(np.max(poisson.ppf(1 - error/priceCap, ltild * (1 + btild) * taus))))
+
+        logFactorials = [0 for _ in range(jMax + 1)]
+        
+        for i in range(jMax):
+            logFactorials[i+1] = logFactorials[i] + np.log(i+1)
 
 
         a = len(jumps)
         y = np.array(jumps)
 
-        currentSize1 = [self.nSims, self.nSteps+1]
-        currentSize2 = [1, 1]
-        currentSize3 = []
-        currentAxes = []
 
         j = 1
 
 
         while j <= jMax:
-            currentSize1.append(1)
-            currentSize2.append(a)
-            z = np.reshape(z,tuple(currentSize1)) @ np.reshape(1 + y, tuple(currentSize2))
-            currentSize1.pop()
-            currentSize2.pop()
-            currentSize1.append(a)
-            currentSize2.append(1)
 
-            currentAxes.append(1+j)
-            currentSize3.append(a)
-            p = np.broadcast_to(p, tuple(currentSize3))
-            payoffTerm = np.sum(self.kappa(z,K,volatility)*p, axis = tuple(currentAxes))
+            combos = self.findCombinations(j,a)
+            
+            payoffTerm = 0
 
-            logProb = j* np.log(ltild) + j* logTaus - logFactorial
+            for combo in combos:
+                temp = logFactorials[j]
+                for k in combo:
+                    temp -= logFactorials[k]
+                temp = np.prod(np.power(p,combo)) * np.exp(temp)
+                payoffTerm +=  self.kappa(z * np.prod(np.power(1+y, combo)),K,volatility) * temp
+
+            logProb = j* np.log(ltild) + j* logTaus - logFactorials[j]
             weight = np.insert(np.exp(logProb), self.nSteps, 0, axis = 1) 
 
             totalSum += payoffTerm * weight
 
+
             j += 1
-            logFactorial += np.log(j)
+
 
         return totalSum * np.exp(- ltild * taus)
 
@@ -201,65 +210,48 @@ class StrategySimulation:
 
         logTaus = np.log(taus[:,:-1])
 
-        logFactorial = 0
-
         priceCap = x[0,0]*10
-        jMax = np.ceil(np.max(poisson.ppf(1 - error/priceCap, ltild * (1 + btild) * taus)))
+        jMax = int(np.ceil(np.max(poisson.ppf(1 - error/priceCap, ltild * (1 + btild) * taus))))
 
+
+        logFactorials = [0 for _ in range(jMax + 1)]
+        
+        for i in range(jMax):
+            logFactorials[i+1] = logFactorials[i] + np.log(i+1)
+
+
+    
 
         a = len(jumps)
         y = np.array(jumps)
 
-        currentSize1 = [self.nSims, self.nSteps+1]
-        currentSize2 = [1, 1]
-
-        coeffs = p * (1+y)
-
-        currentSize3 = [a]
-        currentSize4 = [1]
-        currentAxes = []
 
         j = 1
 
 
         while j <= jMax:
 
-            currentSize1.append(1)
-            currentSize2.append(a)
-            z = np.reshape(z,tuple(currentSize1)) @ np.reshape(1 + y, tuple(currentSize2))
-            currentSize1.pop()
-            currentSize2.pop()
-            currentSize1.append(a)
-            currentSize2.append(1)
+            combos = self.findCombinations(j,a)
+            
+            payoffTerm = 0
+
+            for combo in combos:
+                temp = logFactorials[j]
+                for k in combo:
+                    temp -= logFactorials[k]
+                temp = np.prod(np.power(p,combo)) * np.exp(temp) * np.prod(np.power(1+y, combo))
+                payoffTerm +=  self.delta(z * np.prod(np.power(1+y, combo)),K,volatility) * temp
+ 
 
 
 
-            currentAxes.append(1+j)
-
-            payoffTerm = np.sum(self.delta(z,K,volatility)*coeffs, axis = tuple(currentAxes))
-
-
-            currentSize3.append(1)
-            currentSize4.append(a)
-            coeffs = np.reshape(coeffs, tuple(currentSize3)) @ np.reshape(p*(1+y), tuple(currentSize4))
-            currentSize3.pop()
-            currentSize4.pop()
-            currentSize3.append(a)
-            currentSize4.append(1)
-
-
-
-
-
-
-            logProb = j* np.log(ltild) + j* logTaus - logFactorial
+            logProb = j* np.log(ltild) + j* logTaus - logFactorials[j]
             weight = np.insert(np.exp(logProb), self.nSteps, 0, axis = 1) 
 
             totalSum += payoffTerm * weight
 
             j += 1
-            logFactorial += np.log(j)
-
+            
         return totalSum * np.exp(- ltild *(1 + btild) * taus)
 
 
